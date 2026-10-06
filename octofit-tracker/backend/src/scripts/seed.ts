@@ -14,6 +14,13 @@ type SeedActivity = {
   date: Date;
   notes: string;
 };
+type SeedWorkout = {
+  name: string;
+  description: string;
+  category: 'running' | 'walking' | 'strength-training' | 'cycling' | 'swimming' | 'other';
+  difficulty: 'beginner' | 'intermediate' | 'advanced';
+  durationMinutes: number;
+};
 
 /**
  * Seed the octofit_db database with test data
@@ -62,15 +69,24 @@ async function seedDatabase(): Promise<void> {
       },
     ];
 
-    const users = await Promise.all(
-      userRecords.map(({ username, ...fields }) =>
-        User.findOneAndUpdate({ username }, { $set: fields, $setOnInsert: { username } }, {
-          returnDocument: 'after',
-          upsert: true,
-          runValidators: true,
-        }).exec(),
-      ),
-    );
+    const users = (await Promise.all(
+      userRecords.map(async ({ username, ...fields }) => {
+        const existingUser = await User.findOne({ username }).exec();
+        if (!existingUser) {
+          return User.create({ username, ...fields });
+        }
+        return User.findOneAndUpdate(
+          { username },
+          { $set: fields },
+          { returnDocument: 'after', runValidators: true },
+        ).exec();
+      }),
+    )).map((user) => {
+      if (!user) {
+        throw new Error('Failed to persist a seeded user');
+      }
+      return user;
+    });
     const userByUsername = new Map(users.map((user) => [user.username, user]));
     const getUser = (username: string) => {
       const user = userByUsername.get(username);
@@ -98,15 +114,24 @@ async function seedDatabase(): Promise<void> {
       },
     ];
 
-    const teams = await Promise.all(
-      teamRecords.map(({ name, ...fields }) =>
-        Team.findOneAndUpdate({ name }, { $set: fields, $setOnInsert: { name } }, {
-          returnDocument: 'after',
-          upsert: true,
-          runValidators: true,
-        }).exec(),
-      ),
-    );
+    const teams = (await Promise.all(
+      teamRecords.map(async ({ name, ...fields }) => {
+        const existingTeam = await Team.findOne({ name }).exec();
+        if (!existingTeam) {
+          return Team.create({ name, ...fields });
+        }
+        return Team.findOneAndUpdate(
+          { name },
+          { $set: fields },
+          { returnDocument: 'after', runValidators: true },
+        ).exec();
+      }),
+    )).map((team) => {
+      if (!team) {
+        throw new Error('Failed to persist a seeded team');
+      }
+      return team;
+    });
     const teamByName = new Map(teams.map((team) => [team.name, team]));
     const getTeam = (name: string) => {
       const team = teamByName.get(name);
@@ -284,21 +309,25 @@ async function seedDatabase(): Promise<void> {
 
     await Promise.all(
       users.map((user) =>
-        Leaderboard.findOneAndUpdate(
-          { user: user._id },
-          {
-            $set: {
-              team: getTeam(teamByUsername.get(user.username) ?? '')._id,
-              points: pointsByUserId.get(user._id.toString()) ?? 0,
-            },
-            $setOnInsert: { user: user._id },
-          },
-          { returnDocument: 'after', upsert: true, runValidators: true },
-        ).exec(),
+        (async () => {
+          const fields = {
+            team: getTeam(teamByUsername.get(user.username) ?? '')._id,
+            points: pointsByUserId.get(user._id.toString()) ?? 0,
+          };
+          const existingEntry = await Leaderboard.findOne({ user: user._id }).exec();
+          if (!existingEntry) {
+            return Leaderboard.create({ user: user._id, ...fields });
+          }
+          return Leaderboard.findOneAndUpdate(
+            { user: user._id },
+            { $set: fields },
+            { returnDocument: 'after', runValidators: true },
+          ).exec();
+        })(),
       ),
     );
 
-    const workoutRecords = [
+    const workoutRecords: SeedWorkout[] = [
       {
         name: 'Easy 5K Builder',
         description: 'A comfortable-paced run with a short warm-up and cool-down.',
@@ -344,13 +373,17 @@ async function seedDatabase(): Promise<void> {
     ];
 
     await Promise.all(
-      workoutRecords.map(({ name, ...fields }) =>
-        Workout.findOneAndUpdate({ name }, { $set: fields, $setOnInsert: { name } }, {
-          returnDocument: 'after',
-          upsert: true,
-          runValidators: true,
-        }).exec(),
-      ),
+      workoutRecords.map(async ({ name, ...fields }) => {
+        const existingWorkout = await Workout.findOne({ name }).exec();
+        if (!existingWorkout) {
+          return Workout.create({ name, ...fields });
+        }
+        return Workout.findOneAndUpdate(
+          { name },
+          { $set: fields },
+          { returnDocument: 'after', runValidators: true },
+        ).exec();
+      }),
     );
 
     console.log('Database seeding complete: users, teams, activities, leaderboard, and workouts');
